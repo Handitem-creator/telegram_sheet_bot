@@ -66,7 +66,7 @@ async def data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["data"] = update.message.text
 
     keyboard = [
-        ["DEA", "GLORA"],
+        ["DEA", "GLORIA"],
         ["ALESSANDRO", "MARCO"],
         ["PAOLO", "LUCA"],
         ["TUTTI"]
