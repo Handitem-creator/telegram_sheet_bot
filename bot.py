@@ -7,31 +7,31 @@ from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 
-# --- 1. SETTINGS FLASK (Server per mantenere vivo il bot) ---
+# --- 1. FLASK (Keep-alive per Render) ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return 'Bot online!'
+    return 'Bot is alive!'
 
 def start_flask():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
-# --- 2. SETTINGS GOOGLE SHEETS ---
-def get_gsheet():
+# --- 2. FUNZIONE SALVATAGGIO (Connessione "On-Demand") ---
+def save_to_sheet(data_list):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_json = os.getenv("GOOGLE_CREDENTIALS")
     creds_dict = json.loads(creds_json)
     
-    # Pulizia automatica della chiave privata
     if "\\n" in creds_dict["private_key"]:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    return gspread.authorize(creds).open_by_key("10P2g8kA15PLo6pFwDCHddoMmHrSrmFcj3yaLvhwP2Qc").sheet1
-
-sheet = get_gsheet()
+    client = gspread.authorize(creds)
+    # Sostituisci qui il tuo ID foglio se necessario
+    sheet = client.open_by_key("10P2g8kA15PLo6pFwDCHddoMmHrSrmFcj3yaLvhwP2Qc").sheet1
+    sheet.append_row(data_list)
 
 # --- 3. BOT LOGIC ---
 TOKEN = os.getenv("TOKEN")
@@ -44,18 +44,18 @@ async def start_cmd(u: Update, c: ContextTypes.DEFAULT_TYPE):
 async def handle_data(u: Update, c: ContextTypes.DEFAULT_TYPE):
     c.user_data["data"] = u.message.text
     kb = [["DEA", "GLORIA"], ["ALESSANDRO", "MARCO"], ["PAOLO", "LUCA"], ["TUTTI"]]
-    await u.message.reply_text("👤 Seleziona nome:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    await u.message.reply_text("👤 Nome:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return NOME
 
 async def handle_nome(u: Update, c: ContextTypes.DEFAULT_TYPE):
     c.user_data["nome"] = u.message.text
-    kb = [["POST", "GRAFICA"], ["VIDEO", "FOTO"], ["ARTICOLO", "STORIES"], ["EXTRA"]]
-    await u.message.reply_text("🛠 Tipo lavoro:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    kb = [["POST", "GRAFICA"], ["VIDEO", "FOTO"], ["ARTICOLO", "EXTRA"]]
+    await u.message.reply_text("🛠 Lavoro:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return TIPO
 
 async def handle_tipo(u: Update, c: ContextTypes.DEFAULT_TYPE):
     c.user_data["tipo"] = u.message.text
-    kb = [["PUBBLICATO"], ["PRONTO"], ["IN LAVORAZIONE"]]
+    kb = [["PUBBLICATO", "PRONTO"], ["IN LAVORAZIONE"]]
     await u.message.reply_text("📌 Stato:", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
     return STATO
 
@@ -67,23 +67,28 @@ async def handle_stato(u: Update, c: ContextTypes.DEFAULT_TYPE):
 async def handle_note(u: Update, c: ContextTypes.DEFAULT_TYPE):
     try:
         d = c.user_data
-        sheet.append_row([d["data"], d["nome"], d["tipo"], d["stato"], u.message.text])
-        await u.message.reply_text("✅ Salvato!")
+        # Chiamiamo la connessione solo ora
+        save_to_sheet([d["data"], d["nome"], d["tipo"], d["stato"], u.message.text])
+        await u.message.reply_text("✅ Salvato su Google Sheets!")
     except Exception as e:
-        await u.message.reply_text(f"❌ Errore: {e}")
+        await u.message.reply_text(f"❌ Errore durante il salvataggio: {e}")
     return ConversationHandler.END
 
 async def cancel(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    await u.message.reply_text("Operazione annullata.")
+    await u.message.reply_text("Annullato.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-# --- 4. AVVIO ---
+# --- 4. MAIN ---
 if __name__ == "__main__":
-    # Avviamo Flask in un thread separato
-    threading.Thread(target=start_flask, daemon=True).start()
+    print("--- AVVIO SISTEMA ---")
     
-    # Avviamo il bot (questo deve stare nel thread principale)
-    print("🚀 TENTATIVO AVVIO BOT...")
+    # Avvia Flask
+    t = threading.Thread(target=start_flask, daemon=True)
+    t.start()
+    print("1. Flask avviato in background")
+
+    # Avvia Bot
+    print("2. Inizializzazione Bot...")
     bot_app = ApplicationBuilder().token(TOKEN).build()
     
     conv = ConversationHandler(
@@ -99,6 +104,5 @@ if __name__ == "__main__":
     )
     
     bot_app.add_handler(conv)
-    
-    print("✅ BOT IN ASCOLTO...")
+    print("3. ✅ BOT PRONTO. Vai su Telegram!")
     bot_app.run_polling()
